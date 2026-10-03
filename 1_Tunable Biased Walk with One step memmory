@@ -1,0 +1,133 @@
+import time
+import random
+import numpy as np
+import matplotlib.pyplot as plt
+
+random.seed(42)
+start_time = time.time()
+
+# PARAMETERS
+dimension = 100
+steps = 100000
+
+# Node2Vec parameters
+a = 1   # return parameter
+b = 5   # adj node parameter
+c = 10  # distant node parameter
+
+# CONSTRUCT BARABÁSI-ALBERT NETWORK
+def sample_space(n):
+    prob = []
+    total = 0
+    for j in range(n):
+        node_degree = 0
+        for k in range(n):
+            node_degree += adj_matrix[j][k]
+        prob.append(node_degree)
+        total += node_degree
+    if total == 0:
+        return np.ones(n) / n
+    return np.array(prob) / total
+
+''' slighty better implementation of older function "event" I had been using'''
+def choose(prob_list):
+    r = random.random()
+    cum_prob = 0
+    for node_chosen, p in enumerate(prob_list):
+        cum_prob += p
+        if r <= cum_prob:
+            return node_chosen
+    return len(prob_list) - 1
+
+adj_matrix = np.zeros((dimension, dimension))
+
+for i in range(1, dimension):
+    if i == 1:
+        adj_matrix[0][1] = 1
+        adj_matrix[1][0] = 1
+    else:
+        probs = sample_space(i)
+        picks = set()
+        num_edges = min(3, i)
+        while len(picks) < num_edges:
+            picks.add(choose(probs))
+            
+        for node in picks:
+            adj_matrix[i][node] = 1
+            adj_matrix[node][i] = 1
+
+
+# NODE2VEC BIASED WEIGHTS PREPROCESSING
+'''This loop creates a three dimensional array storing transition probabilities of
+   a biased random walk having one step memmory'''
+biased_weights = np.zeros((dimension, dimension, dimension))
+for i in range(dimension):
+    for j in range(dimension):
+        if adj_matrix[i][j] != 0:
+            biased_weights[i][j][i] = adj_matrix[j][i] * a
+            for k in range(dimension):
+                if adj_matrix[j][k] != 0 and (i != k):
+                    if adj_matrix[k][i] != 0:
+                        biased_weights[i][j][k] = adj_matrix[j][k] * b
+                    elif adj_matrix[k][i] == 0:
+                        biased_weights[i][j][k] = adj_matrix[j][k] * c
+
+        sum_w = np.sum(biased_weights[i][j])
+        if sum_w != 0:
+            biased_weights[i][j] = biased_weights[i][j] / sum_w
+
+
+# NODE2VEC RANDOM WALK
+prev_node = 0
+curr_node = 0
+
+# Find first connected neighbor for initial step
+for k in range(dimension):
+    if adj_matrix[prev_node][k] != 0:
+        curr_node = k
+        break
+
+visited_nodes = []
+
+for i in range(steps):
+    new_node = choose(biased_weights[prev_node][curr_node])
+    prev_node = curr_node
+    curr_node = new_node
+    visited_nodes.append(curr_node)
+
+
+# DATA ANALYSIS AND PLOTTING
+ending_frequency = np.zeros(dimension)
+for node in visited_nodes:
+    ending_frequency[node] += 1
+ending_frequency = ending_frequency / len(visited_nodes)
+
+# Finding neighbor connections ratio
+neigh_conn_list = []
+total_links = 0
+
+for i in range(dimension):
+    neighbours = []
+    for j in range(dimension):
+        if adj_matrix[i][j] != 0:
+            neighbours.append(j)
+            total_links += 1
+            
+    neigh_conn = 0
+    for neigh1 in neighbours:
+        for neigh2 in neighbours:
+            if adj_matrix[neigh1][neigh2] != 0:
+                neigh_conn += 1
+    neigh_conn_list.append(neigh_conn)
+
+neigh_conn_list = np.array(neigh_conn_list) / total_links
+
+plt.scatter(neigh_conn_list, ending_frequency, alpha=0.7)
+plt.grid(True)
+plt.title(f"Node2Vec on {dimension}-Node Scale-Free Network ({steps} steps)")
+plt.suptitle(f"Parameters: a = {a}, b = {b}, c = {c}")
+plt.xlabel("No. of links between neighbors / Total links in network")
+plt.ylabel("Probability of visiting the node")
+plt.show()
+
+print(f"Total Execution Time: {time.time() - start_time:.2f} seconds")
