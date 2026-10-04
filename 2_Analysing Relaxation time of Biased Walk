@@ -1,0 +1,61 @@
+import numpy as np
+import matplotlib.pyplot as plt
+from numpy.linalg import eig
+import time
+start = time.time()
+
+dimension = 25
+adj_matrix = np.load("barabasi_adj_matrix_"+str(dimension)+"nodes.npy")
+scan_range_b = 500
+scan_range_c = 500
+
+def eigen_value_difference(dimension,a,b,c):
+    biased_weights = np.zeros((dimension,dimension,dimension))
+    for i in range(dimension):
+        for j in range(dimension):
+            # if adj_matrix[i][j] == 0 :
+                # values allready zero
+            if adj_matrix[i][j] != 0:
+                biased_weights[i][j][i] = adj_matrix[j][i]*(a)
+                for k in range(dimension):
+                    if adj_matrix[j][k]!= 0 and (i!=k):
+                        if adj_matrix[k][i] != 0:
+                            biased_weights[i][j][k] = adj_matrix[j][k]*(b)
+                        elif adj_matrix[k][i] == 0:
+                            biased_weights[i][j][k] = adj_matrix[j][k]*(c)
+
+            if np.any(biased_weights[i][j]) != 0:
+                biased_weights[i][j] = biased_weights[i][j]/np.sum(biased_weights[i][j])
+    node_map = {} 
+    index = 0
+    for i in range(dimension):
+        for j in range(dimension):
+            if np.any(biased_weights[i][j] != 0):
+                node_map[(i,j)] = index
+                index += 1
+    no_nodes = len(node_map)
+    trans_matrix = np.zeros((no_nodes,no_nodes))
+
+    for i in range(dimension):
+        for j in range (dimension):
+            for k in range(dimension):
+                if biased_weights[i][j][k] != 0:
+                    trans_matrix[node_map[(i,j)]][node_map[(j,k)]] = biased_weights[i][j][k]
+    val , vec = eig(trans_matrix)
+    val = np.sort(val)
+    return(val[-1]-val[-2])
+
+spectral_gaps = np.zeros((scan_range_b,scan_range_c))
+for b in range (0,scan_range_b):
+    for c in range (0,scan_range_c):
+        spectral_gaps[int(b)][int(c)] = eigen_value_difference(dimension,1,b,c)
+    print(b)
+plt.imshow(np.transpose(spectral_gaps),cmap = 'autumn',origin = 'lower')
+plt.title("spectral gap representing relaxation Barabasi_network"+str(dimension)+"nodes")
+plt.colorbar(label = "spectral gap")
+plt.xlabel("Parameter B")
+plt.ylabel("Parameter C")
+plt.show()   
+stop = time.time()  
+
+print(stop - start) 
