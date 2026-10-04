@@ -1,0 +1,65 @@
+import numpy as np
+import random
+
+w_a = 1
+w_b = 1
+time_steps = 10**5
+dimension = 100
+adj_matrix = np.load(f"barabasi_adj_matrix_{dimension}nodes.npy")
+def N2V_update(x_prev, x_curr):
+    neighbors = np.where(adj_matrix[x_curr] != 0)[0]
+    if len(neighbors) == 0:
+        return x_curr 
+    trans_weights = []
+    for neigh in neighbors:
+        if neigh == x_prev:
+            trans_weights.append(1)
+        elif adj_matrix[x_prev][neigh] == 1:
+            trans_weights.append(w_a)
+        else:
+            trans_weights.append(w_b)
+
+    trans_weights = np.array(trans_weights, dtype=float)
+    trans_prob = trans_weights / np.sum(trans_weights)
+
+    r = random.random()
+    cum_prob = np.cumsum(trans_prob)
+    for i, cp in enumerate(cum_prob):
+        if r <= cp:
+            return neighbors[i]
+
+positions_prev, positions_curr = [], []
+
+# Initial positions random
+for walkers in range(dimension): # given a walker per node
+    r = walkers
+    positions_prev.append(r)
+    neighbors = np.where(adj_matrix[r] != 0)[0]
+    index = random.choice(neighbors)
+    positions_curr.append(index)
+
+# Walkers update
+embedding_matrix = np.zeros((time_steps, dimension))
+
+for t in range(time_steps):
+    positions_new = []
+    for i in range(len(positions_curr)):
+        positions_new.append(N2V_update(positions_prev[i], positions_curr[i]))
+
+    positions_prev, positions_curr = positions_curr, positions_new
+
+    freq = np.bincount(np.array(positions_new), minlength=dimension)
+    if np.sum(freq) == 0:
+        prob = np.zeros(dimension)
+    else:
+        prob = freq / np.sum(freq)
+    embedding_matrix[t] = prob
+
+embedding_matrix = embedding_matrix.T
+# Normalize each node embedding
+for i in range(dimension):
+    norm = np.linalg.norm(embedding_matrix[i])
+    if norm != 0:
+        embedding_matrix[i] /= norm
+
+numpy.save(embedding_matrix,embedding_matrix)
