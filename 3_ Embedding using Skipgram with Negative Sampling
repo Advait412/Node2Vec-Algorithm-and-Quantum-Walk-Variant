@@ -1,0 +1,126 @@
+import random
+import numpy as np
+import tensorflow as tf
+import time
+
+# Random Walk Parameters 
+dimension = 100
+steps = 100000
+window_size = 5  
+a, b, c = 1,5,10
+
+# Load adjacency matrix 
+adj_matrix = np.load(f"barabasi_adj_matrix_{dimension}nodes.npy")
+biased_weights = np.load(f"biased_weights_barabasi_adj_matrix_a={a}b={b}c={c}nodes_{dimension}.npy")
+
+#  Random Walk 
+start_time = time.time() 
+prev_node = 2
+curr_node = None
+for k, val in enumerate(adj_matrix[prev_node]):
+    if val != 0:
+        curr_node = k
+        break
+visited_nodes = []
+
+def choose_node(trans_prob_list):
+    r = random.random()
+    cum_prob = 0
+    for node_chosen, p in enumerate(trans_prob_list):
+        cum_prob += p
+        if r <= cum_prob:
+            return node_chosen
+    return len(trans_prob_list) - 1  # take last one if small rounding errors
+
+visited_nodes = []
+pairs = []
+labels = []
+
+# Walk and Training Data Generation Loop
+for i in range(steps):
+    new_node = choose_node(biased_weights[prev_node][curr_node])
+    prev_node, curr_node = curr_node, new_node
+    visited_nodes.append(new_node)
+    
+    # Look back up to window_size past nodes
+    start = max(0, i - window_size)
+    for j in range(start, i):
+        past_node = visited_nodes[j]
+        
+        # Positive pairs (both directions cover the full symmetric window)
+        pairs.append((new_node, past_node))
+        labels.append(1.0)
+        pairs.append((past_node, new_node))
+        labels.append(1.0)
+        
+        # Negative pairs 
+        for k in range(2):
+            neg_center = random.randint(0, dimension - 1)
+            neg_context = random.randint(0, dimension - 1)
+            pairs.append((neg_center, neg_context))
+            labels.append(0.0)
+
+visited_nodes = np.array(visited_nodes, dtype=np.int32)
+
+pairs = np.array(pairs, dtype=np.int32)
+labels = np.array(labels, dtype=np.float32)
+
+# Create Vectors
+embedding_dim = 10  
+
+class Node2Vec(tf.keras.Model):
+    def __init__(self, vocab_size, embed_dim):
+        super(Node2Vec, self).__init__()
+        self.center_embed = tf.keras.layers.Embedding(vocab_size, embed_dim, input_length=1)
+        self.context_embed = tf.keras.layers.Embedding(vocab_size, embed_dim, input_length=1)
+
+    def call(self, inputs):
+        center, context = inputs
+        center_vector = self.center_embed(center)
+        context_vector = self.context_embed(context)
+        dot = tf.reduce_sum(center_vector * context_vector, axis=-1)
+        prob = tf.sigmoid(dot)
+        return prob
+
+model = Node2Vec(dimension, embedding_dim) #
+optimizer = tf.keras.optimizers.SGD(learning_rate=0.01) #
+loss_fn = tf.keras.losses.BinaryCrossentropy()  #
+
+#  Training Loop 
+batch_size = 124  #
+num_batches = len(pairs) // batch_size  #
+print(f"Starting training for {num_batches} batches")  #
+
+for epoch in range(1): # this loop not necessary actually
+    epoch_loss = 0     #
+    for batch_i in range(num_batches):   #
+        print(str(batch_i)+ "out of " +str(num_batches))
+        batch_start = batch_i * batch_size   #
+        batch_end = batch_start + batch_size  #
+        center_batch = pairs[batch_start:batch_end, 0]  
+        context_batch = pairs[batch_start:batch_end, 1]
+        label_batch = labels[batch_start:batch_end]
+
+        with tf.GradientTape() as tape:
+            preds = model((center_batch, context_batch), training=True)
+            loss = loss_fn(label_batch, preds)
+
+        grads = tape.gradient(loss, model.trainable_variables)
+        optimizer.apply_gradients(zip(grads, model.trainable_variables))
+        epoch_loss += loss.numpy()
+
+        if batch_i % 1000 == 0:
+            print(f"Epoch {epoch + 1}, Batch {batch_i}, Loss: {loss.numpy():.4f}")
+
+    print(f"Epoch {epoch + 1} finished, average loss: {epoch_loss / num_batches:.4f}")
+
+#  Extract embeddings 
+embeddings = model.center_embed.get_weights()[0]
+
+#  Save embeddings as CSV 
+np.save("Orig_N2v_vectors",embeddings)
+np.savetxt("Orig_N2v_vectors.txt", embeddings, delimiter=",")
+print("Embeddings saved to node2vec_embeddings.txt/npy")
+
+end_time = time.time()
+print(f"Total runtime: {end_time - start_time:.2f} seconds")
